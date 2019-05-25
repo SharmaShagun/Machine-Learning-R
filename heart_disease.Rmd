@@ -1,0 +1,443 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+```{r}
+heartDisease= read.csv("C:/Users/Student/Downloads/heart.csv", header = TRUE, sep = ",",fileEncoding="UTF-8-BOM")
+print(heartDisease)
+```
+```{R}
+summary(heartDisease)
+str(heartDisease)
+```
+
+There are no missing or NA values in the datset.
+
+Data Exploration-
+```{r}
+cor(heartDisease[,c("age","sex","cp","trestbps","chol","fbs","restecg","thalach","exang","oldpeak","slope","ca","thal","target")])
+```
+None of the variables are higly correlated with the 'target' variable. Attributes like exang,oldpeak,thalach and cp have their correlation coefficients more than 0.42.
+```{R}
+pairs(heartDisease, col=heartDisease$target)
+
+```
+```{R}
+num_attributes1<-heartDisease[,c("target","age","sex","cp","trestbps")]
+num_attributes2<-heartDisease[,c("target","chol","fbs","restecg")]
+num_attributes3<-heartDisease[,c("target","thalach","exang","oldpeak")]
+num_attributes4<-heartDisease[,c("target","slope","ca","thal")]
+pairs(num_attributes1)
+pairs(num_attributes2)
+pairs(num_attributes3)
+pairs(num_attributes4)
+```
+```{R}
+boxplot(heartDisease$age~heartDisease$target,xlab="age",ylab="target")
+boxplot(heartDisease$chol~heartDisease$target,xlab="chol",ylab="target")
+boxplot(heartDisease$trestbps~heartDisease$target,xlab="trestbps",ylab="target")
+boxplot(heartDisease$cp~heartDisease$target,xlab="cp",ylab="target")
+boxplot(heartDisease$thalach~heartDisease$target,xlab="thalach",ylab="target")
+boxplot(heartDisease$oldpeak~heartDisease$target,xlab="oldpeak",ylab="target")
+boxplot(heartDisease$slope~heartDisease$target,xlab="slope",ylab="target")
+boxplot(heartDisease$thal~heartDisease$target,xlab="thal",ylab="target")
+```
+
+```{R}
+heartDisease$target<-factor(heartDisease$target)
+str(heartDisease$target)
+levels(heartDisease$target) = c("no","yes")
+summary(heartDisease$target)
+```
+```{R}
+heartDisease$sex<-factor(heartDisease$sex)
+heartDisease$fbs<-factor(heartDisease$fbs)
+heartDisease$restecg<-factor(heartDisease$restecg)
+heartDisease$exang<-factor(heartDisease$exang)
+heartDisease$ca<-factor(heartDisease$ca)
+```
+Dataset is split into train data and test data
+```{R}
+library(caret)
+set.seed(1)
+train.index=createDataPartition(heartDisease$target,p = 0.9, list = FALSE)
+heart_train<-heartDisease[train.index, ]
+heart_test <- heartDisease[-train.index, ]
+```
+Predicting target using logistic Regression
+```{R}
+set.seed(1)
+train_control=trainControl(method="cv",number=10)
+model=train(target~.,data=heart_train,method="glm",trControl=train_control,family="binomial")
+model
+```
+Model trained using Logistic Regression gave 83.2% accuracy.
+```{R}
+summary(model)
+```
+A lasso regression model is used with 10-fold cross validation and the lamda parameter is tuned with sequence of 100 values between 0.1 and 100.
+```{R}
+set.seed(1)
+lasso<-train(target~.,data=heart_train,method="glmnet",metric="ROC",trControl=trainControl("cv",number=10,classProbs = TRUE,summaryFunction = twoClassSummary),tuneGrid=expand.grid(alpha=1,lambda=10^seq(-1,2,length=100)))
+```
+Coefficients for best tuned model
+```{R}
+coef(lasso$finalModel, lasso$bestTune$lambda)
+```
+Lasso has shrinked some of the variables to zero.
+```{R}
+#install.packages("ROCR")
+library(ROCR)
+```
+Predictions are made on test data using AUC
+```{R}
+predictions_lasso<-predict(lasso, heart_test,type="prob")
+pred_lasso=prediction(predictions_lasso$yes,heart_test$target)
+performance(pred_lasso, measure="auc")@y.values
+```
+A ridge model is used with 10-fold cross validation and lambda tuned.
+```{R}
+set.seed(1)
+ridge<-train(target~.,data=heart_train,method="glmnet",metric="ROC",trControl=trainControl("cv",number=10,classProbs = TRUE,summaryFunction = twoClassSummary),tuneGrid=expand.grid(alpha=0,lambda=10^seq(-1,2,length=100)))
+predictions_ridge<-predict(ridge, heart_test,type ="prob")
+pred_ridge=prediction(predictions_ridge$yes,heart_test$target)
+performance(pred_ridge, measure="auc")@y.values
+```
+A elastic net model is used to train data using 10-fold cross validation and alpha is tuned with a sequence of 10 values betweeb 0 and 1.
+```{R}
+set.seed(1)
+enet<-train(target~.,data=heart_train,method="glmnet",metric="ROC",trControl=trainControl("cv",number=10,classProbs=TRUE,summaryFunction = twoClassSummary),tuneGrid=expand.grid(alpha=seq(0,1,length=10),lambda=10^seq(-1,2,length=100)))
+predictions_enet<-predict(enet, heart_test,type="prob")
+pred_enet=prediction(predictions_enet$yes,heart_test$target)
+performance(pred_enet, measure="auc")@y.values
+```
+Comparision among the three above models.
+```{R}
+resamps<-resamples(list(L=lasso, R=ridge, E=enet))
+summary(resamps)
+```
+
+Predicting target using random forest
+```{R}
+set.seed(1)
+in.train<-createDataPartition(heartDisease$target, p=0.9,list=FALSE)
+rf.train<-heartDisease[in.train ,]
+rf.test<-heartDisease[-in.train, ]
+```
+```{R}
+set.seed(1)
+m.rf<-train(target~.,data=rf.train,method="rf",trControl=trainControl(method="cv",number=10),tuneGrid=expand.grid(mtry=c(2,4,8,13)),importance=TRUE,family="binomial")
+m.rf
+```
+```{R}
+predictions_rf<-predict(m.rf, heart_test,type = "prob")
+pred_rf=prediction(predictions_rf$yes,heart_test$target)
+performance(pred_rf, measure="auc")@y.values
+```
+```{r}
+varImp(m.rf)
+```
+Predicting target using GBT
+```{R}
+set.seed(1)
+gbm<-train(target~.,data=heart_train,method="gbm",verbose=FALSE,trControl=trainControl("cv",number=10))
+predictions_gbm<-predict(gbm, heart_test,type="prob")
+```
+```{R}
+pred_gbm=prediction(predictions_gbm$yes,heart_test$target)
+performance(pred_gbm, measure="auc")@y.values
+```
+
+Predicting target using neural network
+
+```{R}
+library(caret)
+set.seed(1)
+in.train<-createDataPartition(heart_train$target, p=0.7, list=FALSE)
+heart.train.nn<-heart_train[in.train, ]
+heart.validation.nn<-heart_train[-in.train, ]
+```
+```{r}
+heart.train.nn_scaled<-heart.train.nn[,c(2,6,7,9,12,14)]
+```
+```{R}
+heart.train.nn<-heart.train.nn[,c(-2,-6,-7,-9,-12,-14)]
+#heart.train.nn
+```
+```{R}
+heart.train.nn<-scale(heart.train.nn)
+col_means_train<-attr(heart.train.nn,"scaled:center")
+col_stddevs_train<-attr(heart.train.nn,"scaled:center")
+```
+```{R}
+
+heart.train.nn<-cbind(heart.train.nn,heart.train.nn_scaled)
+```
+```{R}
+str(heart.validation.nn)
+```
+```{R}
+val.not.scaled<-heart.validation.nn[,c(2,6,7,9,12,14)]
+heart.validation.nn<-scale(heart.validation.nn[,c(-2,-6,-7,-9,-12,-14)],center=col_means_train,scale=col_stddevs_train)
+#heart.validation.nn
+```
+```{R}
+heart.validation.nn<-cbind(heart.validation.nn,val.not.scaled)
+#heart.validation.nn
+```
+```{R}
+test.not.scaled<-heart_test[,c(2,6,7,9,12,14)]
+heart_test<-scale(heart_test[,c(-2,-6,-7,-9,-12,-14)],center=col_means_train,scale=col_stddevs_train)
+#heart_test
+```
+```{R}
+heart_test<-cbind(heart_test,test.not.scaled)
+```
+```{R}
+library(keras)
+set.seed(1)
+heart.train.nn.labels<-as.matrix(heart.train.nn[14])
+heart.train.nn<-as.matrix(heart.train.nn[-14])
+heart.validation.nn.labels<-as.matrix(heart.validation.nn[14])
+heart.validation.nn<-as.matrix(heart.validation.nn[-14])
+```
+```{R}
+#summary(heart.train.nn.labels)
+```
+```{R}
+library(keras)
+set.seed(1)
+model_1 <- keras_model_sequential() %>%
+  layer_dense(units = 15, activation = "relu",input_shape = dim(heart.train.nn)[2]) %>%
+  layer_dropout(0.5) %>%
+  layer_dense(units = 1,activation = 'sigmoid')
+model_1 %>% compile(
+  loss="binary_crossentropy",
+  optimizer="adam"
+)
+
+```
+```{R}
+history<-model_1 %>% fit(heart.train.nn,heart.train.nn.labels,batch_size=50,epochs=500,verbose=0,validation_data=list(heart.validation.nn,heart.validation.nn.labels))
+plot(history)
+
+```
+```{R}
+predictions_1<-model_1 %>% predict(heart.validation.nn,type="prob")
+pred_1=prediction(predictions_1$yes,heart.validation.nn$target)
+performance(pred_1, measure="auc")@y.values
+```
+
+```{R}
+library(keras)
+set.seed(1)
+model_2 <- keras_model_sequential() %>%
+  layer_dense(units = 20, activation = "relu",input_shape = dim(heart.train.nn)[2]) %>%
+  layer_dropout(0.5) %>%
+  layer_dense(units = 1,activation = 'sigmoid')
+model_2 %>% compile(
+  loss="binary_crossentropy",
+  optimizer="adam"
+)
+
+```
+```{R}
+history<-model_2 %>% fit(heart.train.nn,heart.train.nn.labels,batch_size=50,epochs=200,validation_data=list(heart.validation.nn,heart.validation.nn.labels))
+plot(history)
+```
+```{R}
+library(ROCR)
+predictions_2<-predict(model_2,heart.validation.nn,type="prob")
+pred_2=prediction(predictions_2$yes,heart.validation.nn.labels$target)
+performance(pred_2, measure="auc")@y.values
+```
+```{R}
+library(keras)
+set.seed(1)
+model_3 <- keras_model_sequential() %>%
+  layer_dense(units = 50, activation = "relu",input_shape = dim(heart.train.nn)[2]) %>%
+  layer_dropout(0.5) %>%
+  layer_dense(units = 1,activation = 'sigmoid')
+model_3 %>% compile(
+  loss="binary_crossentropy",
+  optimizer="adam"
+)
+
+```
+```{R}
+history<-model_3 %>% fit(heart.train.nn,heart.train.nn.labels,batch_size=50,epochs=500,validation_data=list(heart.validation.nn,heart.validation.nn.labels))
+plot(history)
+```
+```{R}
+library(ROCR)
+predictions_3<-predict(model_3,heart.validation.nn,type="prob")
+pred_3=prediction(predictions_3$yes,heart.validation.nn.labels$target)
+performance(pred_3, measure="auc")@y.values
+```
+```{R}
+library(keras)
+set.seed(1)
+model_4 <- keras_model_sequential() %>%
+  layer_dense(units = 20, activation = "relu",input_shape = dim(heart.train.nn)[2]) %>%
+  layer_dropout(0.5) %>%
+  layer_dense(units = 1,activation = 'sigmoid')
+model_4 %>% compile(
+  loss="binary_crossentropy",
+  optimizer="adam"
+)
+
+```
+```{R}
+history<-model_4 %>% fit(heart.train.nn,heart.train.nn.labels,batch_size=100,epochs=500,validation_data=list(heart.validation.nn,heart.validation.nn.labels))
+plot(history)
+```
+```{R}
+library(ROCR)
+predictions_4<-predict(model_4,heart.validation.nn,type="prob")
+pred_4=prediction(predictions_4$yes,heart.validation.nn.labels$target)
+performance(pred_4, measure="auc")@y.values
+```
+
+```{R}
+library(keras)
+set.seed(1)
+model_5 <- keras_model_sequential() %>%
+  layer_dense(units = 50, activation = "relu",input_shape = dim(heart.train.nn)[2]) %>%
+  layer_dropout(0.5) %>%
+  layer_dense(units = 1,activation = 'sigmoid')
+model_5 %>% compile(
+  loss="binary_crossentropy",
+  optimizer="adam"
+)
+
+```
+```{R}
+history<-model_5 %>% fit(heart.train.nn,heart.train.nn.labels,batch_size=100,epochs=500,validation_data=list(heart.validation.nn,heart.validation.nn.labels))
+plot(history)
+```
+```{R}
+library(ROCR)
+predictions_5<-predict(model_5,heart.validation.nn,type="prob")
+pred_5=prediction(predictions_5$yes,heart.validation.nn.labels$target)
+performance(pred_5, measure="auc")@y.values
+```
+```{R}
+library(keras)
+set.seed(1)
+model_6 <- keras_model_sequential() %>%
+  layer_dense(units = 15, activation = "relu",input_shape = dim(heart.train.nn)[2]) %>%
+  layer_dropout(0.1) %>%
+  layer_dense(units = 1,activation = 'sigmoid')
+model_6 %>% compile(
+  loss="binary_crossentropy",
+  optimizer="adam"
+)
+
+```
+```{R}
+history<-model_6 %>% fit(heart.train.nn,heart.train.nn.labels,batch_size=50,epochs=200,validation_data=list(heart.validation.nn,heart.validation.nn.labels))
+plot(history)
+```
+```{R}
+library(ROCR)
+predictions_6<-predict(model_6,heart.validation.nn,type="prob")
+pred_6=prediction(predictions_6$yes,heart.validation.nn.labels$target)
+performance(pred_6, measure="auc")@y.values
+```
+```{r}
+library(keras)
+set.seed(1)
+model_7 <- keras_model_sequential() %>%
+  layer_dense(units = 15, activation = "relu",input_shape = dim(heart.train.nn)[2]) %>%
+  layer_dropout(0.2) %>%
+  layer_dense(units = 1,activation = 'sigmoid')
+model_7 %>% compile(
+  loss="binary_crossentropy",
+  optimizer="adam"
+)
+
+```
+```{R}
+history<-model_7 %>% fit(heart.train.nn,heart.train.nn.labels,batch_size=50,epochs=200,validation_data=list(heart.validation.nn,heart.validation.nn.labels))
+plot(history)
+```
+```{R}
+library(ROCR)
+predictions_7<-predict(model_7,heart.validation.nn,type="prob")
+pred_7=prediction(predictions_7$yes,heart.validation.nn.labels$target)
+performance(pred_7, measure="auc")@y.values
+```
+```{R}
+library(keras)
+set.seed(1)
+model_8 <- keras_model_sequential() %>%
+  layer_dense(units = 15, activation = "relu",input_shape = dim(heart.train.nn)[2]) %>%
+  layer_dropout(0.3) %>%
+  layer_dense(units = 1,activation = 'sigmoid')
+model_8 %>% compile(
+  loss="binary_crossentropy",
+  optimizer="adam"
+)
+
+```
+```{R}
+history<-model_8 %>% fit(heart.train.nn,heart.train.nn.labels,batch_size=50,epochs=200,validation_data=list(heart.validation.nn,heart.validation.nn.labels))
+plot(history)
+```
+```{R}
+library(ROCR)
+predictions_8<-predict(model_8,heart.validation.nn,type="prob")
+pred_8=prediction(predictions_8$yes,heart.validation.nn.labels$target)
+performance(pred_8, measure="auc")@y.values
+```
+```{R}
+library(keras)
+set.seed(1)
+model_9 <- keras_model_sequential() %>%
+  layer_dense(units = 15, activation = "relu",input_shape = dim(heart.train.nn)[2]) %>%
+  layer_dropout(0.4) %>%
+  layer_dense(units = 1,activation = 'sigmoid')
+model_9 %>% compile(
+  loss="binary_crossentropy",
+  optimizer="adam"
+)
+
+```
+```{R}
+history<-model_9 %>% fit(heart.train.nn,heart.train.nn.labels,batch_size=50,epochs=200,validation_data=list(heart.validation.nn,heart.validation.nn.labels))
+plot(history)
+```
+
+```{R}
+library(ROCR)
+predictions_9<-predict(model_9,heart.validation.nn,type="prob")
+pred_9=prediction(predictions_9$yes,heart.validation.nn$target)
+performance(pred_9, measure="auc")@y.values
+```
+```{R}
+library(keras)
+set.seed(1)
+runs=seq(1:100)
+roc=c()
+for(i in runs)
+{
+model_7 <- keras_model_sequential() %>%
+  layer_dense(units = 15, activation = "relu",input_shape = dim(heart.train.nn)[2]) %>%
+  layer_dropout(0.5) %>%
+  layer_dense(units = 1,activation = 'sigmoid')
+model_7 %>% compile(
+  loss="binary_crossentropy",
+  optimizer="adam"
+)
+history<-model_7 %>% fit(heart.train.nn,heart.train.nn.labels,batch_size=50,epochs=200,validation_data=list(heart.validation.nn,heart.validation.nn.labels))
+plot(history)
+}
+```
+```{r}
+all_auc<-matrix(c(predictions_lasso,predictions_ridge,predictions_enet,pred_rf,pred_gbm))
+colnames(performance)<-"performance"
+rownames(auc)<-c("Lassso","Ridge","Enet","RF","GBM")
+as.table(auc)
+```
+```{R}
+```
